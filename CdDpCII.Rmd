@@ -5,7 +5,7 @@ date: "2022-10-24"
 output: html_document
 ---
 
-Cargamos las librerías, que vamos a ir usando a lo largo de todo el desarrollo
+Cargamos las librerías, que vamos a ir usando a lo largo de todo el desarrollo, para no quedarnos con errores en el medio.
 
 ```{r}
 library("tidyverse")
