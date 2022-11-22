@@ -1,0 +1,532 @@
+---
+title: "Obras en CABA"
+author: "Sixto Cristiani"
+date: "2022-10-24"
+output: html_document
+---
+
+Cargamos las librerías, que vamos a ir usando a lo largo de todo el desarrollo
+
+```{r}
+library("tidyverse")
+library("ggplot2")
+library("sf")
+library("osmdata")
+library("rmarkdown")
+library("lubridate")
+library("ggmap") 
+library("mapview")
+library("hrbrthemes")
+library("RColorBrewer")
+library("readr")
+library("leaflet")
+library("osmextract")
+library("ggmap")
+library("forcats")
+library("s2")
+library("tmap")
+library("tmaptools")
+
+```
+
+
+
+Cargamos el dataset de las obras en CABA y filtramos las que no tienen ni lon ni lat. 
+```{r}
+obras_CABA =  read.csv("https://cdn.buenosaires.gob.ar/datosabiertos/datasets/agencia-gubernamental-de-control/obras-iniciadas/obras-iniciadas.csv")
+
+obras_CABA = filter(obras_CABA, long !="na", lat !="na")
+```
+
+Hacemos que el CSV sea un SF
+```{r}
+obras_CABA =  st_as_sf(x = obras_CABA, coords = c("long", "lat"),  crs = 4326)
+
+```
+
+Realizamos un análisis exploratorio para ver si los puntos nos pueden decir algo
+
+```{r}
+mapview(obras_CABA, color = "red", legend = FALSE)
+```
+
+Parece que no mucho.
+
+
+Cargamos los barrios de CABA
+```{r}
+barrios <- read_sf('https://bitsandbricks.github.io/data/CABA_barrios.geojson')
+
+```
+
+Unimos ambos datasets
+
+```{r}
+obras_CABA_barrio =  st_join(barrios,obras_CABA)
+```
+
+Acá sacamos el año de la obra para futuros análisis
+
+```{r}
+obras_CABA_barrio=  mutate(obras_CABA_barrio, anio = substr(obras_CABA_barrio$fecha_inicio_obra, 1, 4))
+
+```
+
+Resumimos por barrio y cantidad las obras.
+
+```{r}
+obras_CABA_barrio_cantidad = obras_CABA_barrio %>% filter(!is.na(BARRIO))  %>% group_by(BARRIO) %>%
+  summarise(cantidad= n())
+```
+
+
+Hacemos nuestro primer gráfico.
+
+```{r, fig.height= 8}
+ obras_CABA_barrio_cantidad   %>%
+  mutate(BARRIO = fct_reorder(BARRIO, cantidad)) %>%
+  ggplot( aes(x=BARRIO, y=cantidad)) +
+    geom_bar(stat="identity", fill="#f68060", alpha=.8, width=.8) +
+    coord_flip() +
+    xlab("") +
+    theme_bw()   +
+    labs(title = "Cantidad de obras en CABA por barrio",
+         subtitle = "Periodo 2016-2020",
+         caption = "Fuente: portal de datos abiertos de la Ciudad - http://data.buenosaires.gob.ar",
+         x = "Barrio",
+         y = "Cantidad",
+      ) + theme_classic()
+```
+Ahora le sumamos el área del barrio al dataset
+
+
+```{r}
+obras_CABA_barrio_cantidad_area =  mutate(obras_CABA_barrio_cantidad, area = as.numeric(st_area(geometry))) %>% mutate(obras_area = cantidad/area)
+```
+
+Ahora graficamos ajustados por el área
+
+```{r, fig.height= 8}
+obras_CABA_barrio_cantidad_area   %>%
+  mutate(BARRIO = fct_reorder(BARRIO, obras_area)) %>%
+  ggplot( aes(x=BARRIO, y=obras_area)) +
+    geom_bar(stat="identity", fill="#f68060", alpha=.8, width=.8) +
+    coord_flip() +
+    xlab("") +
+    theme_bw()  +
+    labs(title = "Cantidad de obras en CABA por barrio",
+         subtitle = "Periodo 2016-2020, ajustado por tamaño del barrio",
+         caption = "Fuente: portal de datos abiertos de la Ciudad - http://data.buenosaires.gob.ar",
+         x = "Barrio",
+         y = "Cantidad",
+      ) 
+``` 
+
+
+Me genera cierta duda. Parece ser que en contar por cantidad no tiene tanto sentido y sí por metro cuadrado. Veamos
+
+```{r}
+obras_CABA_barrio_m_2 = obras_CABA_barrio %>% filter(!is.na(BARRIO),!is.na(metros_a_construir))  %>% group_by(BARRIO) %>%
+  summarise(metros_2= sum(metros_a_construir))
+
+```
+
+
+```{r, fig.height= 8}
+obras_CABA_barrio_m_2   %>%
+  mutate(BARRIO = fct_reorder(BARRIO, metros_2)) %>%
+  ggplot( aes(x=BARRIO, y=metros_2)) +
+    geom_bar(stat="identity", fill="#f68060", alpha=.8, width=.8) +
+    coord_flip() +
+    xlab("") +
+    theme_bw()  +
+    labs(title = "Metros cuadrados construidos CABA por barrio",
+         subtitle = "Periodo 2016-2020",
+         caption = "Fuente: portal de datos abiertos de la Ciudad - http://data.buenosaires.gob.ar",
+         x = "Barrio",
+         y = "Cantidad",
+      ) 
+```
+
+Normalizamos nuevamente por el área del barrio.
+
+```{r}
+obras_CABA_barrio_m_2 = mutate(obras_CABA_barrio_m_2, area = as.numeric(st_area(geometry))) %>% mutate(metros_area = metros_2/area)
+```
+
+
+```{r, fig.height= 8}
+obras_CABA_barrio_m_2   %>%
+  mutate(BARRIO = fct_reorder(BARRIO, metros_area)) %>%
+  ggplot( aes(x=BARRIO, y=metros_area)) +
+    geom_bar(stat="identity", fill="#f68060", alpha=.8, width=.8) +
+    coord_flip() +
+    xlab("") +
+    theme_bw()  +
+    labs(title = "Metros cuadrados construidos CABA por barrio",
+         subtitle = "Periodo 2016-2020, ajustado por area del barrio",
+         caption = "Fuente: portal de datos abiertos de la Ciudad - http://data.buenosaires.gob.ar",
+         x = "Barrio",
+         y = "Cantidad",
+      ) 
+```
+
+
+```{r}
+ggplot() + 
+    geom_sf(data = obras_CABA_barrio_cantidad, aes(fill = cantidad)) +
+  labs(title = "Cantidad de obras en CABA por barrio",
+         subtitle = "Periodo 2016-2020",
+         caption = "Fuente: portal de datos abiertos de la Ciudad - http://data.buenosaires.gob.ar",
+         x = "Barrio",
+         y = "Cantidad",
+      ) + scale_fill_viridis_c() 
+```
+
+```{r}
+ggplot() + 
+    geom_sf(data = obras_CABA_barrio_cantidad_area, aes(fill = obras_area)) +
+  labs(title = "Cantidad de obras en CABA por barrio",
+         subtitle = "Periodo 2016-2020, ajustado por tamaño del barrio",
+         caption = "Fuente: portal de datos abiertos de la Ciudad - http://data.buenosaires.gob.ar",
+         x = "Barrio",
+         y = "Cantidad",
+      ) + scale_fill_viridis_c() 
+```
+
+```{r}
+
+ggplot() + 
+    geom_sf(data = obras_CABA_barrio_m_2, aes(fill = metros_2)) +
+  labs(title = "Metros cuadrados construidos CABA por barrio",
+         subtitle = "Periodo 2016-2020",
+         caption = "Fuente: portal de datos abiertos de la Ciudad - http://data.buenosaires.gob.ar",
+         x = "Barrio",
+         y = "Cantidad",
+      )  + scale_fill_viridis_c()
+```
+
+
+
+```{r}
+ggplot() + 
+    geom_sf(data = obras_CABA_barrio_m_2, aes(fill = metros_area)) +
+ labs(title = "Metros cuadrados construidos CABA por barrio",
+         subtitle = "Periodo 2016-2020, ajustado por area del barrio",
+         caption = "Fuente: portal de datos abiertos de la Ciudad - http://data.buenosaires.gob.ar",
+         x = "Barrio",
+         y = "Cantidad",
+      )  + scale_fill_viridis_c()
+```
+
+
+Hemos realizado un primer análisis exploratorio de las obras realizadas en la ciudad de buenos aires para el período 2016-2020. 
+Por el momento no se distingue etre los años, ni por el tipo de obra (demolición total, demolición parcial, obra nueva, remodelación, etc.)
+
+En cuanto al barrio con mayor cantidad de obras, este es Palermo, sin embargo al ajustar por tamaño del barrio, en donde se encuentran mayor cantidad de obras es en Villa Urquiza. 
+Al analizar los metros cuadrados de obras, Palermo es el barrio con más metros cuadrados en obra, al normalizar nuevamente por área del barrio, resulta que es Montserrat el barrio con mayor proporción de metros cuadrados en obra sobre el área total del barrio. 
+
+
+A nivel geográfico es notable como en ambas variables el sur de la ciudad tiene muchas menos obras tanto en cantidades como en metros cuadrados.
+
+
+
+
+
+Ahora vamos a anlizar si esta cerca del botánico tiene efectos en los precios de los inmuebles.
+
+
+```{r}
+Ml_1 <- lm(log(Properati_Palermo$pm2) ~ log(Properati_Palermo$distancia_botanico), data = Properati_Palermo)
+
+
+summary(Ml_1)
+
+```
+```{r}
+Ml_2 <- lm(Properati_Palermo$pm2 ~ Properati_Palermo$distancia_botanico, data = Properati_Palermo)
+
+
+summary(Ml_2)
+
+```
+```{r}
+Ml_3 <- lm(Properati_Palermo$pm2 ~ Properati_Palermo$area_inf, data = Properati_Palermo)
+
+
+summary(Ml_3)
+
+```
+
+Del análisis econométrico se desprende que tanto la distancia en metros, como la distancia logarítmica no tienen efectos estadísticamente significativos, aunque casi en el límite de los niveles de confianza en el caso de la distancia en metros. Con valores P de 0.0516 y 0.533 respectivamente.
+Sin embargo, al realizar un análisis probit sobre si estar en el área de influencia modifica los precios, obtenemos un resultado estadísticamente significativo. Aunque el R2 es tan solo de 0.001 por lo que la influencia es ínfima.
+
+
+
+Tarea 4
+
+Vamos a utilizar nuevamente el dataset de obras. Vamos a utilizar las 10 más grandes de construcción nueva.
+
+Filtramos por obra nueva
+
+```{r}
+obras_barrio_inicio = filter(obras_CABA, tipo_obra == "OBRA NUEVA")
+```
+Nos quedamos con las 10 obras más grandes
+
+```{r}
+  obras_barrio_inicio_10 <- obras_barrio_inicio[with(obras_barrio_inicio,order(-metros_a_construir)),]
+
+obras_barrio_inicio_10 <- obras_barrio_inicio_10[1:10,]
+```
+graficamos
+
+```{r}
+mapview(obras_barrio_inicio_10)
+```
+
+Profundizamos con el gráfico
+```{r}
+leaflet(obras_barrio_inicio_10)  %>% addProviderTiles("CartoDB.Positron")   %>%  addCircleMarkers(data = obras_barrio_inicio_10, group = "Obras",popup = paste(obras_barrio_inicio_10$calle,obras_barrio_inicio_10$calle_nro) , clusterOptions = markerClusterOptions()) %>%  addLayersControl(
+    overlayGroups = c("Obras"),
+    options = layersControlOptions(collapsed = FALSE)
+  )
+
+```
+
+Preparamos para geolocalizar
+```{r}
+obras_barrio_inicio_10 <- obras_barrio_inicio_10 %>%
+  mutate(direccion = paste0(obras_barrio_inicio_10$calle," " ,obras_barrio_inicio_10$calle_nro, ", CABA, Argentina"))
+```
+
+Geolocalizamos
+```{r}
+direcciones_localizadas <- geocode_OSM(obras_barrio_inicio_10$direccion, 
+                           as.data.frame = TRUE)
+```
+
+```{r}
+head(direcciones_localizadas)
+
+```
+Transformamos a dataset espacial
+
+
+```{r}
+ direcciones_localizadas = direcciones_localizadas %>% st_as_sf(coords = c("lon", "lat"), crs = 4326)
+```
+
+Graficamos con diferencias.
+
+```{r}
+leaflet()  %>% addProviderTiles("CartoDB.Positron")   %>%  addCircleMarkers(data = obras_barrio_inicio_10, group = "Obras",popup = paste(obras_barrio_inicio_10$calle,obras_barrio_inicio_10$calle_nro)) %>%  addCircleMarkers(data = direcciones_localizadas, group = "Direcciones", color = "red", popup = direcciones_localizadas$query)  %>%  
+addLayersControl(
+    overlayGroups = c("Obras","Direcciones"),
+    options = layersControlOptions(collapsed = FALSE)) 
+
+```
+
+Calculamos distancias
+```{r}
+direcciones_localizadas <- direcciones_localizadas %>%  
+  mutate(distancia = apply(st_distance(direcciones_localizadas, obras_barrio_inicio_10), 1 , function (x) min(x)))
+```
+
+Filtramos con un buffer de 50 metros.
+```{r}
+direcciones_localizadas_erroneas = filter(direcciones_localizadas,distancia >50 )
+
+mapview(direcciones_localizadas_erroneas)
+```
+Ahora vamos a hacer una función que podría servir para entrenar modelos. Vamos a calcular las diferencias entre un dataset espacial que contenga datos geo-referenciados y su contraparte. Podría servir para arreglar la BDD de OSM/etc.
+
+
+
+```{r}
+  geo_differences <- function(geo_data_set, direccion){
+  
+  geocode_direcciones =  geocode_OSM(geo_data_set$direccion, as.data.frame = TRUE) 
+  geocode_direcciones =   st_as_sf(x = geocode_direcciones, coords = c("lon", "lat"),  crs = 4326)
+
+  geo_data_set <- geo_data_set %>%  
+  mutate(distancia = apply(st_distance(geo_data_set, geocode_direcciones), 1 , function (x) min(x)))
+  
+direcciones_localizadas_erroneas = filter(geo_data_set,distancia >50 )
+
+
+}
+```
+
+
+```{r}
+direcciones_erroneas = geo_differences(obras_barrio_inicio_10, direccion)
+  
+```
+```{r}
+head(select(direcciones_erroneas,c(23,24)))
+```
+
+Para mejorar de la función queda ver como hacer para los NAs que no pudieron se geolocalizados. Es decir, que la formula nos dice de aquellos que, o están mal referenciados o no están referenciadoS...
+
+
+
+
+
+
+Descargamos la base de datos de Properati.
+
+```{r include=FALSE}
+
+Properati = vroom::vroom("https://storage.googleapis.com/properati-data-public/ar_properties.csv.gz")
+```
+Filtramos varias cuestiones de Properati
+
+```{r}
+Properati1 = Properati %>%  filter(lat!="", lon!="", operation_type == "Venta",property_type == c("Departamento","PH"), currency =="USD", l2 == "Capital Federal" ,surface_covered > 15, !is.na(price) ) 
+```
+
+Agregamos PM2
+```{r}
+Properati1 = Properati1 %>% mutate(pm2 = as.numeric(price)/as.numeric(surface_covered))
+```
+
+Lo hacemos espacial
+
+
+```{r}
+Properati1 = Properati1 %>% st_as_sf(coords = c("lon", "lat"), crs = 4326) 
+```
+
+Descargamos los barrios 
+
+```{r}
+barrios <- st_read('https://bitsandbricks.github.io/data/CABA_barrios.geojson')
+
+```
+Por las dudas intersectamos las propiedades porque a veces el filtro de L2 no funciona tan bien
+```{r}
+palermo = filter(barrios,BARRIO =="PALERMO")
+palermo_geo = palermo
+```
+
+```{r}
+Properati_Palermo = st_intersection(Properati1, palermo)
+```
+
+Descargamos los espacios verdes y nos quedamos solo con el jardín botánico. Nos restringimos al botánico ya que el resto de obersvaciones tiene problemas con puntos cruzados.
+
+```{r}
+espaciosverdes <- read_sf('http://cdn.buenosaires.gob.ar/datosabiertos/datasets/espacios-verdes/espacio-verde-publico.geojson')
+```
+```{r}
+botanico = espaciosverdes %>% filter(clasificac == "JARDÍN BOTÁNICO")
+```
+Agregamos un buffer de 500 metros 
+```{r}
+
+botanico_buffer = st_buffer(botanico , 500)
+
+```
+
+Sacamos el bounding box de Palermo
+
+```{r}
+palermo <- st_bbox(palermo)
+palermo <- as.numeric(palermo)
+
+```
+Descargamos el mapa base
+```{r}
+palermo <- get_stamenmap( bbox  = palermo, 
+                           maptwype = "terrain", 
+                           zoom = 11)
+```
+3.1. Un mapa que muestre los buffers de un dataset y los puntos del otro dataset con un mapa base. El objetivo de este primer mapa es verificar que los buffers se generaron correctamente. En caso de que haya una gran cantidad de buffers, se puede agregar transparencia con el parámetro 'alpha'.
+
+```{r}
+ggmap(palermo) + 
+  geom_sf(data = Properati_Palermo, inherit.aes = FALSE) +
+  geom_sf(data = botanico_buffer, size = 0.5, alpha = 0.5, color ="green", inherit.aes = FALSE) + 
+  theme_void()
+
+```
+
+
+2. Determinar un área de influencia (valor en metros a elección dependiendo de cada análisis) para uno de esos datasets, y calcular cuando elementos del otro se encuentran dentro del área de influencias.
+
+Elegimos st_distace porque fue la que presenta menos errores a la hora de realizar cálculos.
+
+Calculamos la distancia al botánico.
+
+```{r}
+Properati_Palermo = Properati_Palermo %>% mutate(distancia_botanico = apply(st_distance(Properati_Palermo, botanico), 1 , function (x) min(x)) )
+```
+
+Definimos si está dentro del área de influencia
+
+```{r}
+Properati_Palermo = Properati_Palermo %>% mutate(area_inf = ifelse(distancia_botanico >= 500,"No","Si"))
+```
+
+```{r}
+head(Properati_Palermo$area_inf)
+```
+
+
+```{r}
+ggmap(palermo) + 
+  geom_sf(data = Properati_Palermo, inherit.aes = FALSE , aes(color =area_inf)) +
+  geom_sf(data = botanico_buffer, size = 0.5, alpha = 0.5, color ="green", inherit.aes = FALSE ) + 
+  theme_void()
+
+```
+
+
+3.2. Un mapa de puntos del dataset del cual se realizó el buffer mostrando la cantidad de observaciones dentro del área de influencia de establecida', el área de influencia debería realizarse con la función st_union() como vimos en clase. 
+
+
+
+```{r}
+propiedades_botanico = st_intersection(Properati_Palermo , botanico_buffer )
+```
+```{r}
+ggmap(palermo) + 
+  geom_sf(data = propiedades_botanico, inherit.aes = FALSE ,aes(color = distancia_botanico)) + 
+  theme_void()+ scale_color_viridis_c()
+
+
+```
+
+```{r}
+ggmap(palermo) + 
+  geom_sf(data = propiedades_botanico, inherit.aes = FALSE ,aes(color = pm2)) + 
+  theme_void()+ scale_color_viridis_c()
+```
+
+Vemos que la diferencia en el precio del m2 está concentrada de forma diferente en comparación con la distancia al jardín botánico.
+
+
+Calculamos la cantidad que están adentro y afuera
+```{r}
+Palermo_resumen = Properati_Palermo %>% group_by(area_inf) %>%
+  summarise(cantidad= n())
+```
+
+
+```{r}
+head(Palermo_resumen)
+```
+
+Calculamos el área del buffer
+```{r}
+area_botanica = st_area(botanico_buffer)
+
+propiedades_por_m2_buffer=  1313/ area_botanica
+propiedades_por_m2_buffer
+```
+```{r}
+1313 / (6483+1313)
+```
+Del análisis se desprende que en el área de influencia del jardín botánico existen el 16% del total de las propiedades de Palermo en venta. Por otro lado, a grandes rasgos no se desprenden aspectos llamativos en cuanto al vínculo de las propiedades en venta y la zona de influencia del jardín botánico.
+
