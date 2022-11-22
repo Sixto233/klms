@@ -2,4 +2,14 @@
 
 
 
-Analisis visual R
+#Analisis visual R#
+
+
+
+
+
+
+
+
+
+
